@@ -46,6 +46,90 @@ public class HandleCompiler implements NodeVisitor<MethodHandle> {
     }
 
     @Override
+    public MethodHandle visitBlockNode(BlockNode iVisited) {
+        Node[] children = iVisited.children();
+
+        MethodHandle[] handles =
+                Arrays
+                        .stream(children)
+                        .map(node -> compile(node))
+                        .toArray(n -> new MethodHandle[n]);
+
+        return Binder.from(Object.class, Object[].class)
+                .permute(new int[handles.length])
+                .filterForward(0, handles)
+                .drop(0, handles.length - 1)
+                .identity();
+    }
+
+    @Override
+    public MethodHandle visitCallNode(CallNode iVisited) {
+        List<Node> nodes = iVisited.getArgsNode().childNodes();
+
+        switch (iVisited.getName()) {
+            case "+":
+                return Binder.from(Object.class, Object[].class)
+                        .permute(new int[nodes.size() + 1])
+                        .filter(0, compile(iVisited.getReceiverNode()))
+                        .filterForward(1, nodes.stream().map(node -> compile(node)).toArray(n -> new MethodHandle[n]))
+                        .invokeStaticQuiet(LOOKUP, HandleCompiler.class, "add");
+        }
+
+        throw new RuntimeException();
+    }
+
+    @Override
+    public MethodHandle visitFixnumNode(FixnumNode iVisited) {
+        return Binder.from(Object.class, Object[].class)
+                .drop(0)
+                .constant(Long.valueOf(iVisited.getValue()));
+    }
+
+    @Override
+    public MethodHandle visitLocalAsgnNode(LocalAsgnNode iVisited) {
+        return Binder.from(Object.class, Object[].class)
+                .fold(compile(iVisited.getValueNode()))
+                .append(iVisited.getIndex())
+                .permute(1, 2, 0)
+                .foldVoid(Binder.from(void.class, Object[].class, int.class, Object.class).arraySet())
+                .drop(0, 2)
+                .identity();
+    }
+
+    @Override
+    public MethodHandle visitLocalVarNode(LocalVarNode iVisited) {
+        return Binder.from(Object.class, Object[].class)
+                .append(iVisited.getIndex())
+                .invoke(MethodHandles.arrayElementGetter(Object[].class));
+    }
+
+    @Override
+    public MethodHandle visitRootNode(RootNode iVisited) {
+        Node block = iVisited.getBodyNode();
+        StaticScope scope = iVisited.getStaticScope();
+        int varCount = scope.getNumberOfVariables();
+
+        MethodHandle child = compile(block);
+
+        MethodHandle combiner = Binder.from(Object[].class)
+                .append(varCount)
+                .invoke(MethodHandles.arrayConstructor(Object[].class));
+
+        return MethodHandles.foldArguments(child, combiner);
+    }
+
+    public static Object add(Object a, Object b) {
+        if (a instanceof Long) {
+            if (b instanceof Long) {
+                return (Long) a + (Long) b;
+            }
+        }
+        throw new RuntimeException((a == null ? "null" : a.getClass()) + ", " + (b == null ? "null" : b.getClass()));
+    }
+
+    /// UNIMPLEMENTED
+
+    @Override
     public MethodHandle visitAliasNode(AliasNode iVisited) {
         return null;
     }
@@ -106,23 +190,6 @@ public class HandleCompiler implements NodeVisitor<MethodHandle> {
     }
 
     @Override
-    public MethodHandle visitBlockNode(BlockNode iVisited) {
-        Node[] children = iVisited.children();
-
-        MethodHandle[] handles =
-                Arrays
-                        .stream(children)
-                        .map(node -> compile(node))
-                        .toArray(n -> new MethodHandle[n]);
-
-        return Binder.from(Object.class, Object[].class)
-                .permute(new int[handles.length])
-                .filterForward(0, handles)
-                .drop(0, handles.length - 1)
-                .identity();
-    }
-
-    @Override
     public MethodHandle visitBlockPassNode(BlockPassNode iVisited) {
         return null;
     }
@@ -150,31 +217,6 @@ public class HandleCompiler implements NodeVisitor<MethodHandle> {
     @Override
     public MethodHandle visitClassVarNode(ClassVarNode iVisited) {
         return null;
-    }
-
-    @Override
-    public MethodHandle visitCallNode(CallNode iVisited) {
-        List<Node> nodes = iVisited.getArgsNode().childNodes();
-
-        switch (iVisited.getName()) {
-            case "+":
-                return Binder.from(Object.class, Object[].class)
-                        .permute(new int[nodes.size() + 1])
-                        .filter(0, compile(iVisited.getReceiverNode()))
-                        .filterForward(1, nodes.stream().map(node -> compile(node)).toArray(n -> new MethodHandle[n]))
-                        .invokeStaticQuiet(LOOKUP, HandleCompiler.class, "add");
-        }
-
-        throw new RuntimeException();
-    }
-
-    public static Object add(Object a, Object b) {
-        if (a instanceof Long) {
-            if (b instanceof Long) {
-                return (Long) a + (Long) b;
-            }
-        }
-        throw new RuntimeException((a == null ? "null" : a.getClass()) + ", " + (b == null ? "null" : b.getClass()));
     }
 
     @Override
@@ -283,13 +325,6 @@ public class HandleCompiler implements NodeVisitor<MethodHandle> {
     }
 
     @Override
-    public MethodHandle visitFixnumNode(FixnumNode iVisited) {
-        return Binder.from(Object.class, Object[].class)
-                .drop(0)
-                .constant(Long.valueOf(iVisited.getValue()));
-    }
-
-    @Override
     public MethodHandle visitFlipNode(FlipNode iVisited) {
         return null;
     }
@@ -362,24 +397,6 @@ public class HandleCompiler implements NodeVisitor<MethodHandle> {
     @Override
     public MethodHandle visitLiteralNode(LiteralNode iVisited) {
         return null;
-    }
-
-    @Override
-    public MethodHandle visitLocalAsgnNode(LocalAsgnNode iVisited) {
-        return Binder.from(Object.class, Object[].class)
-                .fold(compile(iVisited.getValueNode()))
-                .append(iVisited.getIndex())
-                .permute(1, 2, 0)
-                .foldVoid(Binder.from(void.class, Object[].class, int.class, Object.class).arraySet())
-                .drop(0, 2)
-                .identity();
-    }
-
-    @Override
-    public MethodHandle visitLocalVarNode(LocalVarNode iVisited) {
-        return Binder.from(Object.class, Object[].class)
-                .append(iVisited.getIndex())
-                .invoke(MethodHandles.arrayElementGetter(Object[].class));
     }
 
     @Override
@@ -515,21 +532,6 @@ public class HandleCompiler implements NodeVisitor<MethodHandle> {
     @Override
     public MethodHandle visitReturnNode(ReturnNode iVisited) {
         return null;
-    }
-
-    @Override
-    public MethodHandle visitRootNode(RootNode iVisited) {
-        Node block = iVisited.getBodyNode();
-        StaticScope scope = iVisited.getStaticScope();
-        int varCount = scope.getNumberOfVariables();
-
-        MethodHandle child = compile(block);
-
-        MethodHandle combiner = Binder.from(Object[].class)
-                .append(varCount)
-                .invoke(MethodHandles.arrayConstructor(Object[].class));
-
-        return MethodHandles.foldArguments(child, combiner);
     }
 
     @Override
